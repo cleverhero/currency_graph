@@ -1,5 +1,6 @@
 use GD::Graph;
 use strict;
+#use warnings;
 use CGI ':standard';
 use v5.10.12;
 use HTML::TableExtract;
@@ -12,12 +13,6 @@ my %data;
 my($webID, $d1, $d2) = @ARGV;
 my $date1 = Date->new ($d1);
 my $date2 = Date->new ($d2);
-
-my %websites = (
-    cb => 'http://www.cbr.ru',
-    val => 'http://val.ru',
-    fm => 'http://www.finmarket.ru' 
-);
 
 my %unitPrice = (
     'USD' => 1,
@@ -72,15 +67,15 @@ sub currencyTable {
 sub getUrl {
     my $cur = shift;
     
-    my @d1P = $date1->getDatePatrs;
-    my @d2P = $date2->getDatePatrs;
+    my ($d1,$m1,$y1) = $date1->getDateParts;
+    my ($d2,$m2,$y2) = $date2->getDateParts;
  
     given ($webID) {
         return "http://www.cbr.ru/currency_base/dynamics.aspx?VAL_NM_RQ=$cur&date_req1=$date1&date_req2=$date2&rt=1&mode=1" 
              when 'cb';
-        return "http://val.ru/valhistory.asp?tool=$cur&bd=$d1P[0]&bm=$d1P[1]&by=$d1P[2]&ed=$d2P[0]&em=$d2P[1]&ey=$d2P[2]&showchartp=False" 
+        return "http://val.ru/valhistory.asp?tool=$cur&bd=$d1&bm=$m1&by=$y1&ed=$d2&em=$m2&ey=$y2&showchartp=False" 
              when 'val';
-        return "http://www.finmarket.ru/currency/rates/?id=10148&pv=1&cur=$cur&bd=$d1P[0]&bm=$d1P[1]&by=$d1P[2]&ed=$d2P[0]&em=$d2P[1]&ey=$d2P[2]&x=36&y=16#archive"
+        return "http://www.finmarket.ru/currency/rates/?id=10148&pv=1&cur=$cur&bd=$d1&bm=$m1&by=$y1&ed=$d2&em=$m2&ey=$y2&x=36&y=16#archive"
              when 'fm';
     }
 }
@@ -90,44 +85,40 @@ sub getSearchAttributes {
         return  (attribs => {class => 'data'})
             when 'cb';
         return   (attribs =>{border => 0, 
-                                     width => 433, 
-                                     cellpadding => 6, 
-                                     cellspacing => 1 
-                                           })
+                             width => 433, 
+                             cellpadding => 6, 
+                             cellspacing => 1 
+                             })
             when 'val';
         return (attribs => {class => 'karramba'}) 
             when 'fm';
-    }
+   }
 }
 
 foreach my $key (keys %{$currencyKeys{$webID}}) {
     my $table = currencyTable(getUrl($key),getSearchAttributes);
-    foreach my $ts ( $table->tables ) {
-        my @rows = $ts->rows;
-        for my $i(1..$#rows) {    
-            $data{date}[$i - 1] = $rows[$i][0];
-            $data{$currencyKeys{$webID}{$key}}[$i - 1] = ($rows[$i][2]/$rows[$i][1]) * $unitPrice{$currencyKeys{$webID}{$key}};
+    foreach my $ts ($table->tables) {
+        my (undef, @rows) = $ts->rows;
+        foreach my $cell(@rows) {          
+            if ($#{$data{date}} < $#rows) {                push(@{$data{date}},$cell->[0]);
+            }               push(@{$data{$currencyKeys{$webID}{$key}}}, (($cell->[2]/$cell->[1]) * $unitPrice{$currencyKeys{$webID}{$key}}));
        }
     }
 }
 
-my @graphData = (\@{$data{date}});
-foreach my $key (keys %{$currencyKeys{$webID}}) {
-    push(@graphData,\@{$data{$currencyKeys{$webID}{$key}}});
-}
-
-my $skip = int((($date2 - $date1) * 8)/(1000-70) + 1);
+my @graphData = $data{date};
+@graphData = @data{keys %data};
+my ($gWidth,$gHeight) = (1000,700);
+my $skip = int((($date2 - $date1) * 8)/($gWidth-$gHeight/10) + 1);
 my @colors = ['green', 'blue', 'red', 'black'];
 my %config = (
     title           => 'Time interval of currency change',
     x_label         => 'Date',
     y_label         => 'Currency',
  
-    dclrs           => @colors,  
+    dclrs         => @colors,  
     bgclr         => 'white',   # background colour
     fgclr         => 'black',   # Axes and grid
-    boxclr        => undef,     # Fill colour for box axes, default: not used
-    accentclr     => 'black',    # bar, area and pie outlines.
     labelclr      => 'black',   # labels on axes
     axislabelclr  => 'black',   # values on axes
     legendclr     => 'black',   # Text for the legend
@@ -141,14 +132,13 @@ my %config = (
     y_tick_number   =>  8,
 );
  
-my $lineGraph = GD::Graph::lines->new(1000, 700);
+my $lineGraph = GD::Graph::lines->new($gWidth, $gHeight);
 $lineGraph->set(%config) or warn $lineGraph->error;
 $lineGraph->set_legend_font('GD::gdMediumNormalFont');
-my @titles;
-foreach my $key (keys  %{$currencyKeys{$webID}}) {
-    push(@titles,$currencyKeys{$webID}{$key} . " ($unitPrice{$currencyKeys{$webID}{$key}})");
-}
-$lineGraph->set_legend(@titles);
+
+my @titles = map {$currencyKeys{$webID}{$_}} keys %{$currencyKeys{$webID}};
+
+$lineGraph->set_legend(reverse(@titles));
 my $lineImage = $lineGraph->plot(\@graphData) or die $lineGraph->error;
 
 createPng($lineImage, 'lineGraph');
